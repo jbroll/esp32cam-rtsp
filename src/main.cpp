@@ -366,7 +366,9 @@ void update_camera_settings()
 
   // Frame size and quality can be changed at runtime
   auto frame_size = lookup_frame_size(param_frame_size.value());
+  log_i("Setting frame size: %s -> %d", param_frame_size.value(), frame_size);
   camera->set_framesize(camera, frame_size);
+  log_i("Setting quality: %d", param_jpg_quality.value());
   camera->set_quality(camera, param_jpg_quality.value());
 
   camera->set_brightness(camera, param_brightness.value());
@@ -521,6 +523,7 @@ void setup()
   // Set up URL handlers
   web_server.on("/", HTTP_GET, handle_root);
   web_server.on("/control", HTTP_GET, []() {
+    web_server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     web_server.send(200, "text/html", control_html_start);
   });
   web_server.on("/snapshot", HTTP_GET, handle_snapshot);

@@ -65,6 +65,10 @@
         }
         .stream-controls {
             margin-top: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
         }
         .btn {
             padding: 10px 20px;
@@ -416,6 +420,14 @@
 
         // Apply a single setting immediately (no flash save)
         async function applySetting(id, value) {
+            const wasStreaming = streaming;
+
+            // Stop stream BEFORE changing setting so camera can reconfigure
+            if (wasStreaming) {
+                stopStream();
+                await new Promise(r => setTimeout(r, 200));
+            }
+
             const params = new URLSearchParams();
             params.set(id, value);
             try {
@@ -424,32 +436,30 @@
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
                 });
-                // Restart stream for resolution changes
-                if (id === 'fs' && streaming) {
-                    stopStream();
-                    setTimeout(startStream, 300);
-                }
             } catch (err) {
                 showStatus('Error: ' + err, 'error');
+            }
+
+            // Restart stream after setting applied
+            if (wasStreaming) {
+                await new Promise(r => setTimeout(r, 100));
+                startStream();
             }
         }
 
         // Attach change handlers to all inputs
         function setupChangeHandlers() {
-            // Number and range inputs
             ['fd', 'q', 'b', 'c', 's', 'ael', 'aecv', 'agcg'].forEach(id => {
                 const el = document.getElementById(id);
-                el.addEventListener('change', () => applySetting(id, el.value));
+                if (el) el.addEventListener('change', () => applySetting(id, el.value));
             });
-            // Select inputs
             ['fs', 'e', 'wbm', 'gcl'].forEach(id => {
                 const el = document.getElementById(id);
-                el.addEventListener('change', () => applySetting(id, el.value));
+                if (el) el.addEventListener('change', () => applySetting(id, el.value));
             });
-            // Checkbox inputs
             ['wb', 'awbg', 'ec', 'aec2', 'gc', 'bpc', 'wpc', 'rg', 'lenc', 'hm', 'vm', 'dcw', 'cb'].forEach(id => {
                 const el = document.getElementById(id);
-                el.addEventListener('change', () => applySetting(id, el.checked ? '1' : '0'));
+                if (el) el.addEventListener('change', () => applySetting(id, el.checked ? '1' : '0'));
             });
         }
 
