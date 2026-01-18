@@ -274,6 +274,11 @@ void update_camera_settings()
     return;
   }
 
+  // Frame size and quality can be changed at runtime
+  auto frame_size = lookup_frame_size(param_frame_size.value());
+  camera->set_framesize(camera, frame_size);
+  camera->set_quality(camera, param_jpg_quality.value());
+
   camera->set_brightness(camera, param_brightness.value());
   camera->set_contrast(camera, param_contrast.value());
   camera->set_saturation(camera, param_saturation.value());
