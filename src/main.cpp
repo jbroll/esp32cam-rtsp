@@ -18,6 +18,8 @@
 
 // HTML files
 extern const char index_html_min_start[] asm("_binary_html_index_min_html_start");
+extern const char control_html_start[] asm("_binary_html_control_html_start");
+extern const char control_html_end[] asm("_binary_html_control_html_end");
 
 auto param_group_camera = iotwebconf::ParameterGroup("camera", "Camera settings");
 auto param_frame_duration = iotwebconf::Builder<iotwebconf::UIntTParameter<unsigned long>>("fd").label("Frame duration (ms)").defaultValue(DEFAULT_FRAME_DURATION).min(10).build();
@@ -60,6 +62,9 @@ IotWebConf iotWebConf(thingName.c_str(), &dnsServer, &web_server, WIFI_PASSWORD,
 
 // Camera initialization result
 esp_err_t camera_init_result;
+
+// Forward declarations
+void update_camera_settings();
 
 void handle_root()
 {
@@ -219,6 +224,91 @@ void handle_stream()
   log_v("client disconnected");
   client.stop();
   log_v("stopped streaming");
+}
+
+// JSON API for single-page settings interface
+void handle_api_get_settings()
+{
+  log_v("handle_api_get_settings");
+
+  String json = "{";
+  json += "\"fd\":" + String(param_frame_duration.value()) + ",";
+  json += "\"fs\":\"" + String(param_frame_size.value()) + "\",";
+  json += "\"q\":" + String(param_jpg_quality.value()) + ",";
+  json += "\"b\":" + String(param_brightness.value()) + ",";
+  json += "\"c\":" + String(param_contrast.value()) + ",";
+  json += "\"s\":" + String(param_saturation.value()) + ",";
+  json += "\"e\":\"" + String(param_special_effect.value()) + "\",";
+  json += "\"wb\":" + String(param_whitebal.value() ? 1 : 0) + ",";
+  json += "\"awbg\":" + String(param_awb_gain.value() ? 1 : 0) + ",";
+  json += "\"wbm\":\"" + String(param_wb_mode.value()) + "\",";
+  json += "\"ec\":" + String(param_exposure_ctrl.value() ? 1 : 0) + ",";
+  json += "\"aec2\":" + String(param_aec2.value() ? 1 : 0) + ",";
+  json += "\"ael\":" + String(param_ae_level.value()) + ",";
+  json += "\"aecv\":" + String(param_aec_value.value()) + ",";
+  json += "\"gc\":" + String(param_gain_ctrl.value() ? 1 : 0) + ",";
+  json += "\"agcg\":" + String(param_agc_gain.value()) + ",";
+  json += "\"gcl\":\"" + String(param_gain_ceiling.value()) + "\",";
+  json += "\"bpc\":" + String(param_bpc.value() ? 1 : 0) + ",";
+  json += "\"wpc\":" + String(param_wpc.value() ? 1 : 0) + ",";
+  json += "\"rg\":" + String(param_raw_gma.value() ? 1 : 0) + ",";
+  json += "\"lenc\":" + String(param_lenc.value() ? 1 : 0) + ",";
+  json += "\"hm\":" + String(param_hmirror.value() ? 1 : 0) + ",";
+  json += "\"vm\":" + String(param_vflip.value() ? 1 : 0) + ",";
+  json += "\"dcw\":" + String(param_dcw.value() ? 1 : 0) + ",";
+  json += "\"cb\":" + String(param_colorbar.value() ? 1 : 0);
+  json += "}";
+
+  web_server.sendHeader("Access-Control-Allow-Origin", "*");
+  web_server.send(200, "application/json", json);
+}
+
+void handle_api_set_settings()
+{
+  log_v("handle_api_set_settings");
+
+  // Parse form data and update settings
+  bool changed = false;
+
+  if (web_server.hasArg("fd")) { param_frame_duration.value() = web_server.arg("fd").toInt(); changed = true; }
+  if (web_server.hasArg("fs")) { strncpy(param_frame_size.value(), web_server.arg("fs").c_str(), sizeof(param_frame_size.value())-1); changed = true; }
+  if (web_server.hasArg("q")) { param_jpg_quality.value() = web_server.arg("q").toInt(); changed = true; }
+  if (web_server.hasArg("b")) { param_brightness.value() = web_server.arg("b").toInt(); changed = true; }
+  if (web_server.hasArg("c")) { param_contrast.value() = web_server.arg("c").toInt(); changed = true; }
+  if (web_server.hasArg("s")) { param_saturation.value() = web_server.arg("s").toInt(); changed = true; }
+  if (web_server.hasArg("e")) { strncpy(param_special_effect.value(), web_server.arg("e").c_str(), sizeof(param_special_effect.value())-1); changed = true; }
+  if (web_server.hasArg("wb")) { param_whitebal.value() = web_server.arg("wb") == "1"; changed = true; }
+  if (web_server.hasArg("awbg")) { param_awb_gain.value() = web_server.arg("awbg") == "1"; changed = true; }
+  if (web_server.hasArg("wbm")) { strncpy(param_wb_mode.value(), web_server.arg("wbm").c_str(), sizeof(param_wb_mode.value())-1); changed = true; }
+  if (web_server.hasArg("ec")) { param_exposure_ctrl.value() = web_server.arg("ec") == "1"; changed = true; }
+  if (web_server.hasArg("aec2")) { param_aec2.value() = web_server.arg("aec2") == "1"; changed = true; }
+  if (web_server.hasArg("ael")) { param_ae_level.value() = web_server.arg("ael").toInt(); changed = true; }
+  if (web_server.hasArg("aecv")) { param_aec_value.value() = web_server.arg("aecv").toInt(); changed = true; }
+  if (web_server.hasArg("gc")) { param_gain_ctrl.value() = web_server.arg("gc") == "1"; changed = true; }
+  if (web_server.hasArg("agcg")) { param_agc_gain.value() = web_server.arg("agcg").toInt(); changed = true; }
+  if (web_server.hasArg("gcl")) { strncpy(param_gain_ceiling.value(), web_server.arg("gcl").c_str(), sizeof(param_gain_ceiling.value())-1); changed = true; }
+  if (web_server.hasArg("bpc")) { param_bpc.value() = web_server.arg("bpc") == "1"; changed = true; }
+  if (web_server.hasArg("wpc")) { param_wpc.value() = web_server.arg("wpc") == "1"; changed = true; }
+  if (web_server.hasArg("rg")) { param_raw_gma.value() = web_server.arg("rg") == "1"; changed = true; }
+  if (web_server.hasArg("lenc")) { param_lenc.value() = web_server.arg("lenc") == "1"; changed = true; }
+  if (web_server.hasArg("hm")) { param_hmirror.value() = web_server.arg("hm") == "1"; changed = true; }
+  if (web_server.hasArg("vm")) { param_vflip.value() = web_server.arg("vm") == "1"; changed = true; }
+  if (web_server.hasArg("dcw")) { param_dcw.value() = web_server.arg("dcw") == "1"; changed = true; }
+  if (web_server.hasArg("cb")) { param_colorbar.value() = web_server.arg("cb") == "1"; changed = true; }
+
+  if (changed)
+  {
+    // Apply to camera immediately
+    update_camera_settings();
+    // Only save to flash if requested
+    if (web_server.hasArg("save") && web_server.arg("save") == "1")
+    {
+      iotWebConf.saveConfig();
+    }
+  }
+
+  web_server.sendHeader("Access-Control-Allow-Origin", "*");
+  web_server.send(200, "application/json", "{\"status\":\"ok\"}");
 }
 
 esp_err_t initialize_camera()
@@ -428,18 +518,22 @@ void setup()
     delay(500);
   }
 
-  // Set up required URL handlers on the web server
+  // Set up URL handlers
   web_server.on("/", HTTP_GET, handle_root);
-  web_server.on("/config", []
-                { iotWebConf.handleConfig(); });
-  // Camera snapshot
+  web_server.on("/control", HTTP_GET, []() {
+    web_server.send(200, "text/html", control_html_start);
+  });
   web_server.on("/snapshot", HTTP_GET, handle_snapshot);
-  // Camera stream
   web_server.on("/stream", HTTP_GET, handle_stream);
 #ifdef FLASH_LED_GPIO
-  // Flash led
   web_server.on("/flash", HTTP_GET, handle_flash);
 #endif
+  // JSON API for single-page interface
+  web_server.on("/api/settings", HTTP_GET, handle_api_get_settings);
+  web_server.on("/api/settings", HTTP_POST, handle_api_set_settings);
+  // IotWebConf config page for WiFi settings
+  web_server.on("/config", []
+                { iotWebConf.handleConfig(); });
   web_server.onNotFound([]()
                         { iotWebConf.handleNotFound(); });
 }
