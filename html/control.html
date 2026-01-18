@@ -172,6 +172,21 @@
             color: #64b5f6;
             margin: 0 10px;
         }
+        .motion-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-left: 8px;
+            background: #666;
+        }
+        .motion-indicator.detected {
+            background: #f44336;
+            box-shadow: 0 0 8px #f44336;
+        }
+        .motion-indicator.ready {
+            background: #4CAF50;
+        }
     </style>
 </head>
 <body>
@@ -358,6 +373,28 @@
                     </div>
                 </div>
 
+                <div class="setting-group">
+                    <h3>Motion Detection</h3>
+                    <div class="setting-row">
+                        <label>Enable</label>
+                        <input type="checkbox" id="me">
+                        <span id="motionStatus" class="motion-indicator"></span>
+                    </div>
+                    <div class="setting-row">
+                        <label>Sensitivity</label>
+                        <input type="range" id="ms" min="1" max="100" oninput="this.nextElementSibling.textContent=this.value">
+                        <span>50</span>
+                    </div>
+                    <div class="setting-row">
+                        <label>Cooldown (ms)</label>
+                        <input type="number" id="mc" min="100" max="60000">
+                    </div>
+                    <div class="setting-row">
+                        <label>Threshold (%)</label>
+                        <input type="number" id="mt" min="1" max="100">
+                    </div>
+                </div>
+
                 <div class="actions">
                     <button class="btn btn-primary" onclick="saveToFlash()">Save to Flash</button>
                     <button class="btn btn-secondary" onclick="loadSettings()">Reload</button>
@@ -457,10 +494,30 @@
                 const el = document.getElementById(id);
                 if (el) el.addEventListener('change', () => applySetting(id, el.value));
             });
-            ['wb', 'awbg', 'ec', 'aec2', 'gc', 'bpc', 'wpc', 'rg', 'lenc', 'hm', 'vm', 'dcw', 'cb'].forEach(id => {
+            ['wb', 'awbg', 'ec', 'aec2', 'gc', 'bpc', 'wpc', 'rg', 'lenc', 'hm', 'vm', 'dcw', 'cb', 'me'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.addEventListener('change', () => applySetting(id, el.checked ? '1' : '0'));
             });
+            // Motion detection settings (no stream restart needed)
+            ['ms', 'mc', 'mt'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('change', () => applyMotionSetting(id, el.value));
+            });
+        }
+
+        // Apply motion setting without restarting stream
+        async function applyMotionSetting(id, value) {
+            const params = new URLSearchParams();
+            params.set(id, value);
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+            } catch (err) {
+                showStatus('Error: ' + err, 'error');
+            }
         }
 
         async function loadSettings() {
@@ -500,6 +557,13 @@
                 document.getElementById('dcw').checked = data.dcw === 1;
                 document.getElementById('cb').checked = data.cb === 1;
 
+                // Motion detection settings
+                document.getElementById('me').checked = data.me === 1;
+                document.getElementById('ms').value = data.ms;
+                document.getElementById('ms').nextElementSibling.textContent = data.ms;
+                document.getElementById('mc').value = data.mc;
+                document.getElementById('mt').value = data.mt;
+
                 showStatus('Loaded', 'success');
             } catch (err) {
                 showStatus('Failed to load: ' + err, 'error');
@@ -536,6 +600,11 @@
             params.set('vm', document.getElementById('vm').checked ? '1' : '0');
             params.set('dcw', document.getElementById('dcw').checked ? '1' : '0');
             params.set('cb', document.getElementById('cb').checked ? '1' : '0');
+            // Motion detection settings
+            params.set('me', document.getElementById('me').checked ? '1' : '0');
+            params.set('ms', document.getElementById('ms').value);
+            params.set('mc', document.getElementById('mc').value);
+            params.set('mt', document.getElementById('mt').value);
 
             try {
                 const resp = await fetch('/api/settings', {
@@ -554,9 +623,47 @@
             }
         }
 
+        // Motion status polling
+        let motionPollInterval = null;
+        const motionIndicator = document.getElementById('motionStatus');
+
+        async function pollMotionStatus() {
+            if (!document.getElementById('me').checked) {
+                motionIndicator.className = 'motion-indicator';
+                return;
+            }
+            try {
+                const resp = await fetch('/api/motion');
+                const data = await resp.json();
+                if (data.detected) {
+                    motionIndicator.className = 'motion-indicator detected';
+                } else if (data.ready) {
+                    motionIndicator.className = 'motion-indicator ready';
+                } else {
+                    motionIndicator.className = 'motion-indicator';
+                }
+            } catch (e) {
+                motionIndicator.className = 'motion-indicator';
+            }
+        }
+
+        function startMotionPolling() {
+            if (!motionPollInterval) {
+                motionPollInterval = setInterval(pollMotionStatus, 500);
+            }
+        }
+
+        function stopMotionPolling() {
+            if (motionPollInterval) {
+                clearInterval(motionPollInterval);
+                motionPollInterval = null;
+            }
+        }
+
         // Initialize
         loadSettings();
         setupChangeHandlers();
+        startMotionPolling();
     </script>
 </body>
 </html>

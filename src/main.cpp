@@ -15,6 +15,7 @@
 #include <format_number.h>
 #include <moustache.h>
 #include <settings.h>
+#include <motion_detect.h>
 
 // HTML files
 extern const char index_html_min_start[] asm("_binary_html_index_min_html_start");
@@ -47,6 +48,13 @@ auto param_hmirror = iotwebconf::Builder<iotwebconf::CheckboxTParameter>("hm").l
 auto param_vflip = iotwebconf::Builder<iotwebconf::CheckboxTParameter>("vm").label("Vertical mirror").defaultValue(DEFAULT_VERTICAL_MIRROR).build();
 auto param_dcw = iotwebconf::Builder<iotwebconf::CheckboxTParameter>("dcw").label("Downsize enable").defaultValue(DEFAULT_DCW).build();
 auto param_colorbar = iotwebconf::Builder<iotwebconf::CheckboxTParameter>("cb").label("Colorbar").defaultValue(DEFAULT_COLORBAR).build();
+
+// Motion detection parameters
+auto param_group_motion = iotwebconf::ParameterGroup("motion", "Motion detection");
+auto param_motion_enable = iotwebconf::Builder<iotwebconf::CheckboxTParameter>("me").label("Enable motion detection").defaultValue(false).build();
+auto param_motion_sensitivity = iotwebconf::Builder<iotwebconf::UIntTParameter<uint8_t>>("ms").label("Sensitivity (1-100)").defaultValue(50).min(1).max(100).build();
+auto param_motion_cooldown = iotwebconf::Builder<iotwebconf::UIntTParameter<uint16_t>>("mc").label("Cooldown (ms)").defaultValue(2000).min(100).max(60000).build();
+auto param_motion_threshold = iotwebconf::Builder<iotwebconf::UIntTParameter<uint8_t>>("mt").label("Threshold (% blocks)").defaultValue(10).min(1).max(100).build();
 
 // Camera
 OV2640 cam;
@@ -215,6 +223,13 @@ void handle_stream()
   {
     client.write("\r\n--" STREAM_CONTENT_BOUNDARY "\r\n");
     cam.run();
+
+    // Process frame for motion detection if enabled
+    if (param_motion_enable.value())
+    {
+      motionDetector.processFrame(cam.getfb(), cam.getSize());
+    }
+
     client.write("Content-Type: image/jpeg\r\nContent-Length: ");
     sprintf(size_buf, "%d\r\n\r\n", cam.getSize());
     client.write(size_buf);
@@ -256,7 +271,12 @@ void handle_api_get_settings()
   json += "\"hm\":" + String(param_hmirror.value() ? 1 : 0) + ",";
   json += "\"vm\":" + String(param_vflip.value() ? 1 : 0) + ",";
   json += "\"dcw\":" + String(param_dcw.value() ? 1 : 0) + ",";
-  json += "\"cb\":" + String(param_colorbar.value() ? 1 : 0);
+  json += "\"cb\":" + String(param_colorbar.value() ? 1 : 0) + ",";
+  // Motion detection settings
+  json += "\"me\":" + String(param_motion_enable.value() ? 1 : 0) + ",";
+  json += "\"ms\":" + String(param_motion_sensitivity.value()) + ",";
+  json += "\"mc\":" + String(param_motion_cooldown.value()) + ",";
+  json += "\"mt\":" + String(param_motion_threshold.value());
   json += "}";
 
   web_server.sendHeader("Access-Control-Allow-Origin", "*");
@@ -296,6 +316,22 @@ void handle_api_set_settings()
   if (web_server.hasArg("dcw")) { param_dcw.value() = web_server.arg("dcw") == "1"; changed = true; }
   if (web_server.hasArg("cb")) { param_colorbar.value() = web_server.arg("cb") == "1"; changed = true; }
 
+  // Motion detection settings
+  bool motion_changed = false;
+  if (web_server.hasArg("me")) { param_motion_enable.value() = web_server.arg("me") == "1"; motion_changed = true; }
+  if (web_server.hasArg("ms")) { param_motion_sensitivity.value() = web_server.arg("ms").toInt(); motion_changed = true; }
+  if (web_server.hasArg("mc")) { param_motion_cooldown.value() = web_server.arg("mc").toInt(); motion_changed = true; }
+  if (web_server.hasArg("mt")) { param_motion_threshold.value() = web_server.arg("mt").toInt(); motion_changed = true; }
+
+  if (motion_changed)
+  {
+    motionDetector.configure(
+      param_motion_sensitivity.value(),
+      param_motion_cooldown.value(),
+      param_motion_threshold.value()
+    );
+  }
+
   if (changed)
   {
     // Apply to camera immediately
@@ -309,6 +345,20 @@ void handle_api_set_settings()
 
   web_server.sendHeader("Access-Control-Allow-Origin", "*");
   web_server.send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
+void handle_api_motion()
+{
+  String json = "{";
+  json += "\"enabled\":" + String(param_motion_enable.value() ? "true" : "false") + ",";
+  json += "\"detected\":" + String(motionDetector.isMotionDetected() ? "true" : "false") + ",";
+  json += "\"last_motion\":" + String(motionDetector.getLastMotionTime()) + ",";
+  json += "\"changed_percent\":" + String(motionDetector.getChangedBlockPercent()) + ",";
+  json += "\"ready\":" + String(motionDetector.isReady() ? "true" : "false");
+  json += "}";
+
+  web_server.sendHeader("Access-Control-Allow-Origin", "*");
+  web_server.send(200, "application/json", json);
 }
 
 esp_err_t initialize_camera()
@@ -492,6 +542,13 @@ void setup()
   param_group_camera.addItem(&param_colorbar);
   iotWebConf.addParameterGroup(&param_group_camera);
 
+  // Motion detection parameter group
+  param_group_motion.addItem(&param_motion_enable);
+  param_group_motion.addItem(&param_motion_sensitivity);
+  param_group_motion.addItem(&param_motion_cooldown);
+  param_group_motion.addItem(&param_motion_threshold);
+  iotWebConf.addParameterGroup(&param_group_motion);
+
   iotWebConf.setConfigSavedCallback(on_config_saved);
   iotWebConf.setWifiConnectionCallback(on_connected);
 #ifdef USER_LED_GPIO
@@ -512,6 +569,12 @@ void setup()
     if (camera_init_result == ESP_OK)
     {
       update_camera_settings();
+      // Configure motion detector with saved settings
+      motionDetector.configure(
+        param_motion_sensitivity.value(),
+        param_motion_cooldown.value(),
+        param_motion_threshold.value()
+      );
       break;
     }
 
@@ -534,6 +597,7 @@ void setup()
   // JSON API for single-page interface
   web_server.on("/api/settings", HTTP_GET, handle_api_get_settings);
   web_server.on("/api/settings", HTTP_POST, handle_api_set_settings);
+  web_server.on("/api/motion", HTTP_GET, handle_api_motion);
   // IotWebConf config page for WiFi settings
   web_server.on("/config", []
                 { iotWebConf.handleConfig(); });
