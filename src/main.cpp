@@ -173,10 +173,8 @@ void handle_snapshot()
     return;
   }
 
-  // Remove old images stored in the frame buffer
-  auto frame_buffers = CAMERA_CONFIG_FB_COUNT;
-  while (frame_buffers--)
-    cam.run();
+  // Capture latest frame (CAMERA_GRAB_LATEST mode already provides freshest frame)
+  cam.run();
 
   auto fb_len = cam.getSize();
   auto fb = (const char *)cam.getfb();
@@ -312,6 +310,11 @@ void start_rtsp_server()
 void on_connected()
 {
   log_v("on_connected");
+
+  // Disable WiFi power saving for low-latency streaming
+  WiFi.setSleep(WIFI_PS_NONE);
+  esp_wifi_set_ps(WIFI_PS_NONE);
+
   // Start the RTSP Server if initialized
   if (camera_init_result == ESP_OK)
     start_rtsp_server();
