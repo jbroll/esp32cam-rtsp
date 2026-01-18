@@ -444,10 +444,229 @@ void setup()
                         { iotWebConf.handleNotFound(); });
 }
 
+// Serial command interface
+String serialBuffer;
+
+// X-macro parameter table - define all camera parameters once
+// ULONG: unsigned long parameters
+#define PARAMS_ULONG(X) \
+  X(fd, param_frame_duration)
+
+// INT: signed int parameters
+#define PARAMS_INT(X) \
+  X(b, param_brightness) \
+  X(c, param_contrast) \
+  X(s, param_saturation) \
+  X(ael, param_ae_level) \
+  X(aecv, param_aec_value) \
+  X(agcg, param_agc_gain)
+
+// BYTE: byte parameters (printed as int)
+#define PARAMS_BYTE(X) \
+  X(q, param_jpg_quality)
+
+// SELECT: string/select parameters
+#define PARAMS_SELECT(X) \
+  X(fs, param_frame_size) \
+  X(e, param_special_effect) \
+  X(wbm, param_wb_mode) \
+  X(gcl, param_gain_ceiling)
+
+// BOOL: checkbox/boolean parameters
+#define PARAMS_BOOL(X) \
+  X(wb, param_whitebal) \
+  X(awbg, param_awb_gain) \
+  X(ec, param_exposure_ctrl) \
+  X(aec2, param_aec2) \
+  X(gc, param_gain_ctrl) \
+  X(bpc, param_bpc) \
+  X(wpc, param_wpc) \
+  X(rg, param_raw_gma) \
+  X(lenc, param_lenc) \
+  X(hm, param_hmirror) \
+  X(vm, param_vflip) \
+  X(dcw, param_dcw) \
+  X(cb, param_colorbar)
+
+void listSerialParams()
+{
+  Serial.println("System parameters:");
+  Serial.printf("  iwcWifiSsid = %s\n", iotWebConf.getWifiParameterGroup()->_wifiSsid);
+  Serial.println("  iwcWifiPassword = <hidden>");
+  Serial.println("  iwcApPassword = <hidden>");
+  Serial.println("Camera parameters:");
+
+  // Generate list output using X-macros
+  #define LIST_ULONG(id, p) Serial.printf("  " #id " = %lu\n", p.value());
+  #define LIST_INT(id, p)   Serial.printf("  " #id " = %d\n", p.value());
+  #define LIST_BYTE(id, p)  Serial.printf("  " #id " = %d\n", (int)p.value());
+  #define LIST_SELECT(id, p) Serial.printf("  " #id " = %s\n", p.value());
+  #define LIST_BOOL(id, p)  Serial.printf("  " #id " = %d\n", p.value() ? 1 : 0);
+
+  PARAMS_ULONG(LIST_ULONG)
+  PARAMS_BYTE(LIST_BYTE)
+  PARAMS_INT(LIST_INT)
+  PARAMS_SELECT(LIST_SELECT)
+  PARAMS_BOOL(LIST_BOOL)
+
+  #undef LIST_ULONG
+  #undef LIST_INT
+  #undef LIST_BYTE
+  #undef LIST_SELECT
+  #undef LIST_BOOL
+}
+
+void processSerialCommand(const String& cmd)
+{
+  String trimmed = cmd;
+  trimmed.trim();
+
+  if (trimmed.length() == 0)
+    return;
+
+  if (trimmed == "help" || trimmed == "?")
+  {
+    Serial.println("Serial commands:");
+    Serial.println("  list           - List all parameters");
+    Serial.println("  get <id>       - Get parameter value");
+    Serial.println("  set <id> <val> - Set parameter value");
+    Serial.println("  save           - Save config to flash");
+    Serial.println("  reboot         - Reboot device");
+  }
+  else if (trimmed == "list")
+  {
+    listSerialParams();
+  }
+  else if (trimmed.startsWith("get "))
+  {
+    String id = trimmed.substring(4);
+    id.trim();
+
+    // System parameters
+    if (id == "iwcWifiSsid") { Serial.printf("iwcWifiSsid = %s\n", iotWebConf.getWifiParameterGroup()->_wifiSsid); return; }
+    if (id == "iwcWifiPassword" || id == "iwcApPassword") { Serial.printf("%s = <hidden>\n", id.c_str()); return; }
+
+    // Camera parameters - generate handlers using X-macros
+    #define GET_ULONG(pid, p) if (id == #pid) { Serial.printf(#pid " = %lu\n", p.value()); return; }
+    #define GET_INT(pid, p)   if (id == #pid) { Serial.printf(#pid " = %d\n", p.value()); return; }
+    #define GET_BYTE(pid, p)  if (id == #pid) { Serial.printf(#pid " = %d\n", (int)p.value()); return; }
+    #define GET_SELECT(pid, p) if (id == #pid) { Serial.printf(#pid " = %s\n", p.value()); return; }
+    #define GET_BOOL(pid, p)  if (id == #pid) { Serial.printf(#pid " = %d\n", p.value() ? 1 : 0); return; }
+
+    PARAMS_ULONG(GET_ULONG)
+    PARAMS_BYTE(GET_BYTE)
+    PARAMS_INT(GET_INT)
+    PARAMS_SELECT(GET_SELECT)
+    PARAMS_BOOL(GET_BOOL)
+
+    #undef GET_ULONG
+    #undef GET_INT
+    #undef GET_BYTE
+    #undef GET_SELECT
+    #undef GET_BOOL
+
+    Serial.printf("Parameter '%s' not found\n", id.c_str());
+  }
+  else if (trimmed.startsWith("set "))
+  {
+    String rest = trimmed.substring(4);
+    int spaceIdx = rest.indexOf(' ');
+    if (spaceIdx < 0)
+    {
+      Serial.println("Usage: set <id> <value>");
+      return;
+    }
+    String id = rest.substring(0, spaceIdx);
+    String value = rest.substring(spaceIdx + 1);
+    id.trim();
+    value.trim();
+
+    // System parameters
+    if (id == "iwcWifiSsid")
+    {
+      strncpy(iotWebConf.getWifiParameterGroup()->_wifiSsid, value.c_str(), IOTWEBCONF_WORD_LEN);
+      Serial.printf("Set iwcWifiSsid = %s\n", value.c_str());
+      return;
+    }
+    if (id == "iwcWifiPassword")
+    {
+      strncpy(iotWebConf.getWifiParameterGroup()->_wifiPassword, value.c_str(), IOTWEBCONF_PASSWORD_LEN);
+      Serial.println("Set iwcWifiPassword = <hidden>");
+      return;
+    }
+    if (id == "iwcApPassword")
+    {
+      strncpy(iotWebConf.getApPasswordParameter()->valueBuffer, value.c_str(), IOTWEBCONF_PASSWORD_LEN);
+      Serial.println("Set iwcApPassword = <hidden>");
+      return;
+    }
+
+    // Camera parameters - generate handlers using X-macros
+    #define SET_ULONG(pid, p) if (id == #pid) { p.value() = value.toInt(); Serial.printf("Set " #pid " = %lu\n", p.value()); return; }
+    #define SET_INT(pid, p)   if (id == #pid) { p.value() = value.toInt(); Serial.printf("Set " #pid " = %d\n", p.value()); return; }
+    #define SET_BYTE(pid, p)  if (id == #pid) { p.value() = value.toInt(); Serial.printf("Set " #pid " = %d\n", (int)p.value()); return; }
+    #define SET_SELECT(pid, p) if (id == #pid) { strncpy(p.value(), value.c_str(), sizeof(p.value())-1); Serial.printf("Set " #pid " = %s\n", p.value()); return; }
+    #define SET_BOOL(pid, p)  if (id == #pid) { p.value() = (value == "1" || value == "true"); Serial.printf("Set " #pid " = %d\n", p.value() ? 1 : 0); return; }
+
+    PARAMS_ULONG(SET_ULONG)
+    PARAMS_BYTE(SET_BYTE)
+    PARAMS_INT(SET_INT)
+    PARAMS_SELECT(SET_SELECT)
+    PARAMS_BOOL(SET_BOOL)
+
+    #undef SET_ULONG
+    #undef SET_INT
+    #undef SET_BYTE
+    #undef SET_SELECT
+    #undef SET_BOOL
+
+    Serial.printf("Parameter '%s' not found\n", id.c_str());
+  }
+  else if (trimmed == "save")
+  {
+    iotWebConf.saveConfig();
+    Serial.println("Config saved");
+  }
+  else if (trimmed == "reboot")
+  {
+    Serial.println("Rebooting...");
+    delay(100);
+    ESP.restart();
+  }
+  else
+  {
+    Serial.printf("Unknown command: %s (type 'help' for commands)\n", trimmed.c_str());
+  }
+}
+
+void handleSerial()
+{
+  while (Serial.available())
+  {
+    char c = Serial.read();
+    if (c == '\n' || c == '\r')
+    {
+      if (serialBuffer.length() > 0)
+      {
+        processSerialCommand(serialBuffer);
+        serialBuffer = "";
+      }
+    }
+    else
+    {
+      serialBuffer += c;
+    }
+  }
+}
+
 void loop()
 {
   iotWebConf.doLoop();
+  handleSerial();
 
   if (camera_server)
     camera_server->doLoop();
+
+  // Yield to other tasks (WiFi, etc.) for better scheduling
+  vTaskDelay(1);
 }
