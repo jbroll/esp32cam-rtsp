@@ -400,12 +400,17 @@ void setup()
   param_group_camera.addItem(&param_colorbar);
   iotWebConf.addParameterGroup(&param_group_camera);
 
-  iotWebConf.getApTimeoutParameter()->visible = true;
   iotWebConf.setConfigSavedCallback(on_config_saved);
   iotWebConf.setWifiConnectionCallback(on_connected);
 #ifdef USER_LED_GPIO
   iotWebConf.setStatusPin(USER_LED_GPIO, USER_LED_ON_LEVEL);
 #endif
+  iotWebConf.getApTimeoutParameter()->visible = true;
+
+  // Skip AP mode if WiFi credentials are already configured
+  // (device will still enter AP mode if no credentials are saved)
+  iotWebConf.skipApStartup();
+
   iotWebConf.init();
 
   // Try to initialize 3 times
